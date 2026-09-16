@@ -140,13 +140,12 @@
        <h1 class="brand-font font-bold" style="color:#202b58;font-size:32px;">Masuk ke Ruang Admin</h1>
        <p class="mt-3 leading-relaxed" style="color:#68718f;">Masukkan PIN untuk mengelola draf dan menerbitkan versi publik kuis.</p>
        <form id="admin-pin-form" class="mt-7 space-y-4">
-        <label class="block text-sm font-bold" for="admin-pin-input" style="color:#303a65;">PIN Admin</label>
-        <input id="admin-pin-input" inputmode="numeric" class="w-full rounded-2xl border-2 border-[#dfe1f0] bg-white px-5 py-4 text-center text-lg font-bold tracking-[.3em] text-[#202b58]" maxlength="6" autocomplete="off">
+        <label class="block text-sm font-bold" for="admin-pin-input" style="color:#303a65;">Kata Sandi Admin</label>
+        <input id="admin-pin-input" type="password" class="w-full rounded-2xl border-2 border-[#dfe1f0] bg-white px-5 py-4 text-center text-lg font-bold tracking-[.15em] text-[#202b58]" maxlength="64" autocomplete="off">
         <p id="admin-pin-error" class="hidden rounded-xl bg-[#ffe8e8] px-4 py-3 text-sm font-semibold text-[#b42d39]" role="alert"></p>
         <button type="submit" class="w-full rounded-2xl px-5 py-4 font-extrabold" style="background:#6d4aff;color:#fff;">Verifikasi</button>
        </form>
        <button type="button" class="mt-4 w-full rounded-2xl px-5 py-4 font-extrabold" onclick="showScreen('join')" style="background:#f0eeff;color:#6040e5;">Kembali ke Halaman Siswa</button>
-       <p class="mt-4 text-center text-xs font-semibold" style="color:#9099b8;">PIN contoh: 202608</p>
       </section>
      </div>
     </section>
