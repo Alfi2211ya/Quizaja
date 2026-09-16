@@ -6,6 +6,8 @@
   <script src="https://cdn.tailwindcss.com/3.4.17"></script>
   <script src="https://cdn.jsdelivr.net/npm/lucide@0.263.0/dist/umd/lucide.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=Fraunces:opsz,wght@9..144,700;9..144,800&display=swap" rel="stylesheet">
   <style>
     :root { --ink:#18213d; --navy:#202b58; --violet:#6d4aff; --yellow:#ffcf3a; --mint:#37d8b0; }
@@ -276,44 +278,55 @@
     const escapeHtml = value => { const n=document.createElement("div"); n.textContent=String(value); return n.innerHTML; };
     const safeQuizData = record => { try { const data=JSON.parse(record.quiz_data); return data && Array.isArray(data.questions) ? data : null; } catch { return null; } };
 
-    // ---- storage-backed "shared database" helpers ----
-    async function refreshData(){
-      try{
-        const listing = await window.storage.list('quiz:', true);
-        const quizzes = [];
-        if(listing && listing.keys){
-          for(const k of listing.keys){
-            try{ const r = await window.storage.get(k, true); if(r) quizzes.push({quiz_code:k.slice(5), quiz_data:r.value}); }catch{}
-          }
-        }
-        state.publicRecords = quizzes;
-      }catch(e){ /* no quizzes yet */ }
-      try{
-        const listing = await window.storage.list('result:', true);
+    // ---- Firebase Realtime Database backend ----
+    const firebaseConfig = {
+      apiKey: "AIzaSyCe7kdfKS82LHPPDRe8bvNGBD5BSTF0cD4",
+      authDomain: "quizaja.firebaseapp.com",
+      databaseURL: "https://quizaja-default-rtdb.asia-southeast1.firebasedatabase.app",
+      projectId: "quizaja",
+      storageBucket: "quizaja.firebasestorage.app",
+      messagingSenderId: "715559095041",
+      appId: "1:715559095041:web:fa35b44ae95a4b78dbe900",
+      measurementId: "G-PVFB6Z3F35"
+    };
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
+
+    function setupRealtimeListeners(){
+      db.ref('quizzes').on('value', snapshot => {
+        const val = snapshot.val() || {};
+        state.publicRecords = Object.keys(val).map(code => ({ quiz_code: code, quiz_data: JSON.stringify(val[code]) }));
+        if ($("admin-screen").classList.contains("active")) renderAdmin();
+      }, () => flash("Gagal tersambung ke database. Periksa koneksi internet."));
+      db.ref('results').on('value', snapshot => {
+        const val = snapshot.val() || {};
         const results = [];
-        if(listing && listing.keys){
-          for(const k of listing.keys){
-            try{ const r = await window.storage.get(k, true); if(r){ const parsed=JSON.parse(r.value); parsed._key=k; results.push(parsed); } }catch{}
-          }
-        }
+        Object.keys(val).forEach(code => {
+          const codeResults = val[code] || {};
+          Object.keys(codeResults).forEach(id => {
+            results.push({ ...codeResults[id], _key: code + '/' + id });
+          });
+        });
         state.resultRecords = results;
-      }catch(e){ /* no results yet */ }
-      if ($("admin-screen").classList.contains("active")) renderAdmin();
+        if ($("admin-screen").classList.contains("active")) renderAdmin();
+      });
     }
-    async function checkDeviceForCode(code){
-      try{ const r = await window.storage.get('device:'+code, false); return r ? r.value : null; }catch{ return null; }
+
+    // Device tracking uses localStorage on the actual deployed site (one attempt per browser).
+    function checkDeviceForCode(code){
+      try{ return localStorage.getItem('quizarena_device_'+code); }catch{ return null; }
     }
-    async function registerDeviceForCode(code){
-      try{ await window.storage.set('device:'+code, 'active', false); }catch{}
+    function registerDeviceForCode(code){
+      try{ localStorage.setItem('quizarena_device_'+code, 'active'); }catch{}
     }
-    async function markDeviceCompleted(code){
-      try{ await window.storage.set('device:'+code, 'completed', false); }catch{}
+    function markDeviceCompleted(code){
+      try{ localStorage.setItem('quizarena_device_'+code, 'completed'); }catch{}
     }
 
     function showScreen(name) {
       document.querySelectorAll(".screen").forEach(el => el.classList.remove("active"));
       $(name + "-screen").classList.add("active");
-      if (name === "admin") { refreshData(); renderAdmin(); }
+      if (name === "admin") { renderAdmin(); }
       window.scrollTo({top:0,behavior:"smooth"});
     }
     function flash(message) {
@@ -323,27 +336,26 @@
     function setError(id,message) { $(id).textContent=message; $(id).classList.remove("hidden"); }
     function hideError(id) { $(id).classList.add("hidden"); }
 
-    $("code-form").addEventListener("submit", async event => {
+    $("code-form").addEventListener("submit", event => {
       event.preventDefault();
       const code=normalizeCode($("game-code").value);
-      await refreshData();
       const record=state.publicRecords.find(item => normalizeCode(item.quiz_code) === code);
       const quiz=record ? safeQuizData(record) : null;
       if (!quiz || !quiz.questions.length) return setError("code-error","Ruangan belum tersedia. Pastikan admin sudah mempublikasikan kuis dengan kode ini.");
 
-      const deviceStatus=await checkDeviceForCode(code);
+      const deviceStatus=checkDeviceForCode(code);
       if (deviceStatus === "completed") return setError("code-error","Perangkat ini sudah pernah mengerjakan kuis dengan kode ini. Satu device hanya bisa mengerjakan satu kali.");
       if (deviceStatus === "active") return setError("code-error","Kuis sedang berlangsung di perangkat ini. Selesaikan atau muat ulang halaman.");
 
       hideError("code-error"); state.activeQuiz=quiz; showScreen("name");
     });
-    $("name-form").addEventListener("submit", async event => {
+    $("name-form").addEventListener("submit", event => {
       event.preventDefault();
       const name=$("student-name").value.trim();
       if (name.length < 2) return setError("name-error","Masukkan nama minimal 2 karakter.");
       hideError("name-error");
       state.studentName=name;
-      await registerDeviceForCode(normalizeCode($("game-code").value));
+      registerDeviceForCode(normalizeCode($("game-code").value));
       startQuiz();
     });
     $("admin-pin-form").addEventListener("submit", event => {
@@ -407,7 +419,7 @@
       $("score-message").textContent=ratio>=.95 ? "Luar biasa — kamu menaklukkan semua soal dengan cepat!" : ratio>=.75 ? "Kerja bagus! Terus pertahankan rasa ingin tahumu." : ratio>=.5 ? "Awal yang bagus. Coba lagi dan raih skor lebih tinggi!" : "Jangan menyerah! Pelajari jawaban dan coba lagi.";
       $("save-result-note").textContent="";
       showScreen("results");
-      await markDeviceCompleted(normalizeCode(quiz.code));
+      markDeviceCompleted(normalizeCode(quiz.code));
       await saveStudentResult();
     }
     async function saveStudentResult() {
@@ -415,8 +427,7 @@
       state.savingResult=true;
       $("save-result-note").textContent="Menyimpan hasil ke daftar kelas...";
       const quiz=state.activeQuiz;
-      const id = Date.now()+"_"+Math.random().toString(36).slice(2,8);
-      const key = "result:"+normalizeCode(quiz.code)+":"+id;
+      const code=normalizeCode(quiz.code);
       const payload = {
         student_name: state.studentName,
         student_code: quiz.code || "",
@@ -426,13 +437,12 @@
         student_time: new Date().toISOString()
       };
       try{
-        const result = await window.storage.set(key, JSON.stringify(payload), true);
-        $("save-result-note").textContent = result ? "Skormu sudah tersimpan di daftar kelas." : "Skor tampil, tetapi penyimpanan hasil belum berhasil.";
+        await db.ref('results/'+code).push(payload);
+        $("save-result-note").textContent = "Skormu sudah tersimpan di daftar kelas.";
       }catch(e){
         $("save-result-note").textContent = "Skor tampil, tetapi penyimpanan hasil belum berhasil.";
       }
       state.savingResult=false;
-      await refreshData();
     }
     function resetStudent() {
       clearInterval(state.timer); state.activeQuiz=null; state.studentName=""; $("student-name").value=""; $("game-code").value=""; showScreen("join");
@@ -502,12 +512,11 @@
       if(!quiz.questions.length) return flash("Tambahkan minimal satu pertanyaan sebelum publikasi.");
       const code=normalizeCode(quiz.code);
       if(code.length<4) return flash("Kode permainan minimal 4 karakter.");
-      const data = JSON.stringify({title:quiz.title,code,questions:quiz.questions});
+      const data = {title:quiz.title,code,questions:quiz.questions};
       state.publishing=true; renderAdmin();
       try{
-        const result = await window.storage.set('quiz:'+code, data, true);
-        await refreshData();
-        flash(result ? "Versi publik aktif. Siswa dapat masuk dengan kode "+code+"." : "Publikasi gagal. Periksa koneksi lalu coba lagi.");
+        await db.ref('quizzes/'+code).set(data);
+        flash("Versi publik aktif. Siswa dapat masuk dengan kode "+code+".");
       }catch(e){
         flash("Publikasi gagal. Periksa koneksi lalu coba lagi.");
       }
@@ -604,17 +613,15 @@
       flash("Menghapus " + recordsToDelete.length + " hasil siswa...");
       let deletedCount = 0;
       for (const record of recordsToDelete) {
-        try{ const result = await window.storage.delete(record._key, true); if (result) deletedCount++; }catch(e){}
+        try{ await db.ref('results/'+record._key).remove(); deletedCount++; }catch(e){}
       }
       $("delete-results-button").disabled = false;
-      await refreshData();
       renderResultsList();
       flash("Dihapus " + deletedCount + " dari " + recordsToDelete.length + " hasil siswa.");
     }
 
     lucide.createIcons();
-    refreshData();
-    state.refreshTimer=setInterval(refreshData, 8000);
+    setupRealtimeListeners();
 
     $("prev-page-btn").addEventListener("click", () => {
       if (state.currentPage > 0) { state.currentPage--; renderResultsList(); $("results-list").closest(".leaderboard-scroll").scrollTop = 0; }
