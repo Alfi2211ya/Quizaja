@@ -103,6 +103,8 @@
        </div>
        <div id="timer-ring" class="timer-ring shrink-0" style="--progress:100"><div id="timer-number" class="timer-inner">20</div></div>
       </div>
+      <button id="music-toggle" type="button" class="hidden mb-4 inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 text-sm font-bold text-[#6d4aff] shadow-sm" onclick="toggleMusic()"><span id="music-toggle-icon">🔊</span> <span id="music-toggle-label">Musik menyala</span></button>
+      <audio id="quiz-bg-music" loop></audio>
       <section class="overflow-hidden rounded-[2rem] bg-white panel-shadow">
        <div class="p-6 sm:p-10">
         <div id="question-image-container" class="hidden mb-6 rounded-xl overflow-hidden bg-[#f5f5fa]"><img id="quiz-question-image" src="" alt="Gambar soal" class="w-full h-auto max-h-80 object-cover"></div>
@@ -166,6 +168,7 @@
          <form id="settings-form" class="mt-5 space-y-4">
           <div><label class="mb-2 block text-sm font-bold" for="quiz-title" style="color:#303a65;">Judul kuis</label><input id="quiz-title" class="w-full rounded-xl border-2 border-[#e0e2ef] px-4 py-3 font-bold"></div>
           <div><label class="mb-2 block text-sm font-bold" for="admin-code" style="color:#303a65;">Kode permainan</label><input id="admin-code" class="w-full rounded-xl border-2 border-[#e0e2ef] px-4 py-3 font-bold uppercase" maxlength="8"></div>
+          <div><label class="mb-2 block text-sm font-bold" for="admin-music-url" style="color:#303a65;">Link musik latar (opsional)</label><input id="admin-music-url" type="url" placeholder="https://.../musik.mp3" class="w-full rounded-xl border-2 border-[#e0e2ef] px-4 py-3 text-sm"><p class="mt-1 text-xs font-semibold text-[#68718f]">Isi dengan link file MP3 (upload sendiri atau dari situs musik bebas royalti). Musik akan diputar selama siswa mengerjakan kuis.</p></div>
           <button class="w-full rounded-xl px-4 py-3 font-bold" type="submit" style="background:#eef0ff;color:#6040e5;">Simpan pengaturan draf</button>
          </form>
          <div class="mt-5 border-t border-[#e7e7f2] pt-5">
@@ -389,6 +392,7 @@
     function startQuiz() {
       if (!state.activeQuiz || !state.activeQuiz.questions.length) { flash("Kuis belum tersedia untuk dimainkan."); return showScreen("join"); }
       clearInterval(state.timer); state.currentQuestion=0; state.score=0; state.correctCount=0; showScreen("quiz"); renderQuestion();
+      startBackgroundMusic(state.activeQuiz.musicUrl);
     }
     function renderQuestion() {
       clearInterval(state.timer);
@@ -441,6 +445,7 @@
       $("score-message").textContent=ratio>=.95 ? "Luar biasa — kamu menaklukkan semua soal dengan cepat!" : ratio>=.75 ? "Kerja bagus! Terus pertahankan rasa ingin tahumu." : ratio>=.5 ? "Awal yang bagus. Coba lagi dan raih skor lebih tinggi!" : "Jangan menyerah! Pelajari jawaban dan coba lagi.";
       $("save-result-note").textContent="";
       showScreen("results");
+      stopBackgroundMusic();
       markDeviceCompleted(normalizeCode(quiz.code));
       await saveStudentResult();
     }
@@ -467,7 +472,27 @@
       state.savingResult=false;
     }
     function resetStudent() {
-      clearInterval(state.timer); state.activeQuiz=null; state.studentName=""; $("student-name").value=""; $("game-code").value=""; showScreen("join");
+      clearInterval(state.timer); stopBackgroundMusic(); state.activeQuiz=null; state.studentName=""; $("student-name").value=""; $("game-code").value=""; showScreen("join");
+    }
+
+    function startBackgroundMusic(url){
+      const audio=$("quiz-bg-music"), toggleBtn=$("music-toggle");
+      if(!url){ toggleBtn.classList.add("hidden"); return; }
+      audio.src=url; audio.volume=0.5; audio.muted=false;
+      audio.play().catch(()=>{ /* autoplay blocked, student can unmute manually */ });
+      toggleBtn.classList.remove("hidden");
+      $("music-toggle-icon").textContent="🔊"; $("music-toggle-label").textContent="Musik menyala";
+    }
+    function stopBackgroundMusic(){
+      const audio=$("quiz-bg-music");
+      audio.pause(); audio.currentTime=0; audio.src="";
+      $("music-toggle").classList.add("hidden");
+    }
+    function toggleMusic(){
+      const audio=$("quiz-bg-music");
+      audio.muted=!audio.muted;
+      $("music-toggle-icon").textContent=audio.muted?"🔇":"🔊";
+      $("music-toggle-label").textContent=audio.muted?"Musik dimatikan":"Musik menyala";
     }
 
     function renderAdmin() {
@@ -479,12 +504,14 @@
           if (quiz && quiz.questions) {
             state.draft.questions=quiz.questions;
             state.draft.title=quiz.title || state.draft.title;
+            state.draft.musicUrl=quiz.musicUrl || state.draft.musicUrl || "";
           }
         }
         state.lastRenderedCode=code;
       }
       $("quiz-title").value=state.draft.title;
       $("admin-code").value=state.draft.code;
+      $("admin-music-url").value=state.draft.musicUrl || "";
       const published=state.publicRecords.some(r=>normalizeCode(r.quiz_code)===normalizeCode(state.draft.code));
       $("session-status").textContent=published?"Versi publik aktif":"Belum dipublikasikan";
       $("session-status").className="rounded-full px-3 py-1 text-xs font-extrabold "+(published?"bg-[#d9fff2] text-[#08775a]":"bg-[#ffe8aa] text-[#665000]");
@@ -526,15 +553,16 @@
     $("settings-form").addEventListener("submit",event=>{
       event.preventDefault();
       const title=$("quiz-title").value.trim(), code=normalizeCode($("admin-code").value);
+      const musicUrl=$("admin-music-url").value.trim();
       if(!title || code.length<4) return flash("Judul dan kode minimal 4 karakter wajib diisi.");
-      state.draft.title=title; state.draft.code=code; renderAdmin(); flash("Pengaturan draf disimpan. Publikasikan untuk memperbarui ruang siswa.");
+      state.draft.title=title; state.draft.code=code; state.draft.musicUrl=musicUrl; renderAdmin(); flash("Pengaturan draf disimpan. Publikasikan untuk memperbarui ruang siswa.");
     });
     async function publishQuiz() {
       const quiz=state.draft;
       if(!quiz.questions.length) return flash("Tambahkan minimal satu pertanyaan sebelum publikasi.");
       const code=normalizeCode(quiz.code);
       if(code.length<4) return flash("Kode permainan minimal 4 karakter.");
-      const data = {title:quiz.title,code,questions:quiz.questions};
+      const data = {title:quiz.title,code,questions:quiz.questions,musicUrl:quiz.musicUrl||""};
       state.publishing=true; renderAdmin();
       try{
         await db.ref('quizzes/'+code).set(data);
